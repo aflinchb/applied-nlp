@@ -23,7 +23,7 @@ trait PointCreator extends (String => Iterator[(String,String,Point)])
  */
 object DirectCreator extends PointCreator {
 
- def apply(filename: String) = List[(String,String,Point)]().toIterator
+ def apply(filename: String) : List[(String,String,Point)]().toIterator = {}
 
 }
 
