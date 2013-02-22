@@ -23,8 +23,22 @@ trait PointCreator extends (String => Iterator[(String,String,Point)])
  */
 object DirectCreator extends PointCreator {
 
- def apply(filename: String) : List[(String,String,Point)]().toIterator = {}
+ def apply(filename: String) : Iterator[(String,String,Point)] = { 
+ 
 
+ val DataRE = """(\d+) (\d+) (-?\d+\.?\d*) (-?\d+\.?\d*)\n?""".r
+ val data = io.Source.fromFile(filename).mkString.split("\n")
+ 
+
+ val dataParsed = data.flatMap{
+	case DataRE(id, label, pt1, pt2) => 
+		Some((id, label, Point(IndexedSeq(pt1.toDouble,pt2.toDouble))))
+ 	
+	case _ => None
+}.toIterator
+
+ dataParsed
+}
 }
 
 
@@ -34,9 +48,25 @@ object DirectCreator extends PointCreator {
  */
 object SchoolsCreator extends PointCreator {
 
-  def apply(filename: String) = List[(String,String,Point)]().toIterator
-
+  def apply(filename: String): Iterator[(String,String,Point)] = {
+	
+	val SchoolRE = """([A-Z ]+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s*""".r
+	val scores = io.Source.fromFile(filename).mkString.split("\n")
+        
+        
+	val scoresParsed = scores.flatMap{
+		case SchoolRE(school, read4, math4, read6, math6) =>
+			Some( List((school.trim.replaceAll(" ","_")++"_4", "4", Point(IndexedSeq(read4.toDouble,math4.toDouble))),(school.trim.replaceAll(" ","_") ++ "_6", "6", Point(IndexedSeq(read6.toDouble,math6.toDouble)))))
+		case _ => None
+	}.flatten.toIterator
+  
+  scoresParsed
+ 
+  }
 }
+
+
+
 
 /**
  * A standalone object with a main method for converting the birth.dat rows
@@ -44,8 +74,20 @@ object SchoolsCreator extends PointCreator {
  */
 object CountriesCreator extends PointCreator {
 
-  def apply(filename: String) = List[(String,String,Point)]().toIterator
+  def apply(filename: String): Iterator[(String,String,Point)] = {
+	
+	val CountryRE = """([A-Z \.]+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s*""".r
 
+	val countries = io.Source.fromFile(filename).mkString.split("\n")
+
+	val countriesParsed = countries.flatMap{
+		case CountryRE(country, birth, death) =>
+			Some ((country.trim.replaceAll(" ","_"), "1", Point(IndexedSeq(birth.toDouble,death.toDouble))))
+		case _ => None
+	}.toIterator
+	//countriesParsed.foreach(println)
+	countriesParsed
+  }
 }
 
 /**
@@ -57,8 +99,28 @@ object CountriesCreator extends PointCreator {
  */
 class FederalistCreator(simple: Boolean = false) extends PointCreator {
 
-  def apply(filename: String) = List[(String,String,Point)]().toIterator
+  def apply(filename: String) : Iterator[(String,String,Point)] = {
 
+	val articleInfo = FederalistArticleExtractor(filename)
+	val ids = {for(article <- articleInfo) yield{ article.getOrElse("id","err")}}.toIndexedSeq
+ 	val labels = {for (article <- articleInfo) yield{article.getOrElse("author","err")}}.toIndexedSeq
+	val textSeq = {for(article <- articleInfo) yield{article.getOrElse("text","err").toLowerCase}}.toIndexedSeq
+	
+	
+	val feds = for (id <- ids) yield
+	{
+		if(simple){
+			(id,labels(ids.indexOf(id)),extractSimple(textSeq)(ids.indexOf(id)))
+		}
+		else{
+		
+			(id,labels(ids.indexOf(id)),extractFull(textSeq)(ids.indexOf(id)))
+		}
+	}
+	feds.toIndexedSeq.toIterator
+	
+
+  }
   /**
    * Given the text of an article, compute the frequency of "the", "people"
    * and "which" and return a Point per article that has the frequency of
@@ -70,7 +132,18 @@ class FederalistCreator(simple: Boolean = false) extends PointCreator {
    *              FederalistArticleExtractor).
    */
   def extractSimple(texts: IndexedSeq[String]): IndexedSeq[Point] = {
-    Vector[Point]()
+
+     val tokenizedTexts = texts.map(w=> SimpleTokenizer(w))
+     
+     val part5 = List(List("the"),List("which"),List("people"))
+         
+     val points = {for(text <- tokenizedTexts) yield {
+	Point(getWordCount(text,part5))
+     }}.toIndexedSeq
+    
+     points
+    
+    
   }
 
   /**
@@ -82,8 +155,58 @@ class FederalistCreator(simple: Boolean = false) extends PointCreator {
    *              FederalistArticleExtractor).
    */
   def extractFull(texts: IndexedSeq[String]): IndexedSeq[Point] = {
-    Vector[Point]()
+    	val tokenizedTexts = texts.map(w => SimpleTokenizer(w))
+
+	val pronouns = List("i","you","we","he","they","me","us","her","him","them","my","mine","our","ours","theirs","their","her","hers","his","myself","itself","himself","herself","ourselves","themselves","anything","something","everything","nothing","anyone","everyone","someone")
+     	val prepositions = List("about","in","across","inside","into","near","against","along","near","around","of","at","off","behind","onto","beside","besides","over","by","through","despite","to","down","toward","during","with","within","for","from","without")
+     	val determiners = List("the","a","an","some","any","this","each","no","that","every","all","half","both","twice","one","two","first","other","second","another","next","last","many","few","much","more","most","several","little","less","least","no","own")
+     	val conj = List("and","or","but","so","after","before","when","since","as","while","because","although","though","if","what","which","where","who","whose","how","than")      
+     	val modal = List("can","might","may","would","will","should","must","shall","could") 
+
+    	val test1 = List(List("constitution"),List("people"),List("which"))
+    	val full = List(List("which"),prepositions,List("constitution"),List("people"))
+	val test3 = List(determiners,pronouns,List("constitution"),List("people"))
+        val test5 = List(conj,determiners,modal,List("constitution"),List("people"))
+
+     	val points = {for(text <- tokenizedTexts) yield {
+		//Point(getWordFreq(text,test3)++getWordCount(text,full))
+ 		//Point(IndexedSeq(getAvgWordLength(text))++getWordCount(text,test5))
+		Point(getWordCount(text,full))
+		//Point(getWordCount(text,test5))
+		//Point(IndexedSeq(getAvgWordLength(text))++getWordCount(text,full))
+		//Point(getWordCount(text,List(List("the"),List("which"),List("people"))))
+
+     }}.toIndexedSeq
+    
+     points
+
+ }
+
+  def getWordCount(text: IndexedSeq[String], words: List[List[String]]): IndexedSeq[Double] = {
+	{for (word <- words) yield {
+	   val num = for( wd <- word) yield {
+ 		 text.count(w=> w == wd).toDouble
+		}
+	   num.sum.toDouble
+  	}}.toIndexedSeq
   }
+
+  def getWordFreq(text: IndexedSeq[String], words: List[List[String]]): IndexedSeq[Double] = {
+	{for (word <- words) yield{
+	 val num = for ( wd <- word ) yield {
+		text.count(w => w == wd).toDouble
+	}
+	num.sum.toDouble / text.length
+	}}.toIndexedSeq
+
+}
+
+  def getAvgWordLength(text: IndexedSeq[String]): Double = {
+	val avg = (text.map(w => w.length).sum.toDouble)/text.length
+	avg
+  }
+
+
 
 }
 
